@@ -338,33 +338,16 @@ func sameObject(file1, file2 string) bool {
 	b1 := bufio.NewReader(f1)
 	b2 := bufio.NewReader(f2)
 
-	// Go object files begin with an initial line:
+	// Go object files and archives contain lines of the form
 	//	go object <goos> <goarch> <version>
 	// By default, the version on development branches includes
 	// the Git hash and time stamp for the most recent commit.
-	// Allow the versions to differ.
-	line1, err1 := b1.ReadString('\n')
-	if err1 != nil {
-		log.Fatalf("reading %s: %v", file1, err1)
-	}
-	fields1 := strings.Fields(line1)
-	if !strings.HasPrefix(line1, "go object ") || len(fields1) <= 4 {
-		log.Fatalf("reading %s: malformed go object file", file1)
+	// We allow the versions to differ.
+	if !skipVersion(b1, b2, file1, file2) {
+		return false
 	}
 
-	line2, err2 := b2.ReadString('\n')
-	if err2 != nil {
-		log.Fatalf("reading %s: %v", file2, err2)
-	}
-	fields2 := strings.Fields(line2)
-	if !strings.HasPrefix(line2, "go object ") || len(fields2) <= 4 {
-		log.Fatalf("reading %s: malformed go object file", file2)
-	}
-
-	if fields1[2] != fields2[2] || fields1[3] != fields2[3] {
-		log.Fatalf("reading %s: mismatched go object files: %s and %s", file1, strings.Join(fields1[:4], " "), strings.Join(fields2[:4], " "))
-	}
-
+	lastByte := byte(0)
 	for {
 		c1, err1 := b1.ReadByte()
 		c2, err2 := b2.ReadByte()
@@ -374,10 +357,100 @@ func sameObject(file1, file2 string) bool {
 		if err1 != nil {
 			log.Fatalf("reading %s: %v", file1, err1)
 		}
+		if err2 != nil {
+			log.Fatalf("reading %s: %v", file2, err1)
+		}
 		if c1 != c2 {
 			return false
 		}
+		if lastByte == '`' && c1 == '\n' {
+			if !skipVersion(b1, b2, file1, file2) {
+				return false
+			}
+		}
+		lastByte = c1
 	}
+}
+
+func skipVersion(b1, b2 *bufio.Reader, file1, file2 string) bool {
+	// Consume "go object " prefix, if there.
+	prefix := "go object "
+	for i := 0; i < len(prefix); i++ {
+		c1, err1 := b1.ReadByte()
+		c2, err2 := b2.ReadByte()
+		if err1 == io.EOF && err2 == io.EOF {
+			return true
+		}
+		if err1 != nil {
+			log.Fatalf("reading %s: %v", file1, err1)
+		}
+		if err2 != nil {
+			log.Fatalf("reading %s: %v", file2, err1)
+		}
+		if c1 != c2 {
+			return false
+		}
+		if c1 != prefix[i] {
+			return true // matching bytes, just not a version
+		}
+	}
+
+	// Keep comparing until second space.
+	// Must continue to match.
+	// If we see a \n, it's not a version string after all.
+	for numSpace := 0; numSpace < 2; {
+		c1, err1 := b1.ReadByte()
+		c2, err2 := b2.ReadByte()
+		if err1 == io.EOF && err2 == io.EOF {
+			return true
+		}
+		if err1 != nil {
+			log.Fatalf("reading %s: %v", file1, err1)
+		}
+		if err2 != nil {
+			log.Fatalf("reading %s: %v", file2, err1)
+		}
+		if c1 != c2 {
+			return false
+		}
+		if c1 == '\n' {
+			return true
+		}
+		if c1 == ' ' {
+			numSpace++
+		}
+	}
+
+	// Have now seen 'go object goos goarch ' in both files.
+	// Now they're allowed to diverge, until the \n, which
+	// must be present.
+	for {
+		c1, err1 := b1.ReadByte()
+		if err1 == io.EOF {
+			log.Fatalf("reading %s: unexpected EOF", file1, err1)
+		}
+		if err1 != nil {
+			log.Fatalf("reading %s: %v", file1, err1)
+		}
+		if c1 == '\n' {
+			break
+		}
+	}
+	for {
+		c2, err2 := b2.ReadByte()
+		if err2 == io.EOF {
+			log.Fatalf("reading %s: unexpected EOF", file2, err2)
+		}
+		if err2 != nil {
+			log.Fatalf("reading %s: %v", file2, err2)
+		}
+		if c2 == '\n' {
+			break
+		}
+	}
+
+	// Consumed "matching" versions from both.
+	return true
 }
 
 func runCmd(cmd []string, keepLog bool, logName string) (output []byte, err error) {
