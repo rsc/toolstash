@@ -84,7 +84,7 @@
 //	go tool dist install liblink cmd/gc cmd/6a cmd/6g
 //
 //	# Check that new tools behave identically to saved tools.
-//	go build -toolexec toolstash -a std
+//	go build -toolexec 'toolstash -cmp' -a std
 //
 //	# If not, restore, in order to keep working on Go code.
 //	toolstash restore
