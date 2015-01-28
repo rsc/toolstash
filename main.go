@@ -96,17 +96,22 @@
 // of the most recent Git commit. Functionally equivalent
 // compilers built at different Git versions may produce object files that
 // differ only in the recorded version. Toolstash ignores version mismatches
-// when comparing object files, but the standard tools will refuse to link together
-// packages with different object versions. In general, the way to avoid having
-// packages with different versions is to run ``go install -a std''
-// (after first verifying that the tools work).
+// when comparing object files, but the standard tools will refuse to compile
+// or link together packages with different object versions.
 //
-// The version skew check in the linker can be disabled by invoking
-// the go command with ``-ldflags -f''.
-// A more permanent way to disable version checks is to write a
-// $GOROOT/VERSION file, which will be used in place of the Git commit information.
-// To keep all.bash working, the VERSION file should contain a single line that
-// contains the text ``devel'' as a substring.
+// For the full build in the final example above to work, both the stashed
+// and the installed tools must use the same version string.
+// One way to ensure this is not to commit any of the changes being
+// tested, so that the Git HEAD hash is the same for both builds.
+// A more robust way to force the tools to have the same version string
+// is to write a $GOROOT/VERSION file, which overrides the Git-based version
+// computation:
+//
+//	echo devel >$GOROOT/VERSION
+//
+// The version can be arbitrary text, but to pass all.bash's API check, it must
+// contain the substring ``devel''. The VERSION file must be created before
+// building either version of the toolchain.
 //
 package main // import "rsc.io/toolstash"
 
