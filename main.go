@@ -7,10 +7,10 @@
 //
 // Usage:
 //
-//	toolstash [-v] save [tool...]
-//	toolstash [-v] restore [tool...]
-//	toolstash [-v] go run x.go
-//	toolstash [-v] [-cmp] 6g x.go
+//	toolstash [-n] [-v] save [tool...]
+//	toolstash [-n] [-v] restore [tool...]
+//	toolstash [-n] [-v] go run x.go
+//	toolstash [-n] [-v] [-cmp] 6g x.go
 //
 // The toolstash command manages a ``stashed'' copy of the Go toolchain
 // kept in $GOROOT/pkg/toolstash. In this case, the toolchain means the
@@ -29,7 +29,12 @@
 // to an installed binary. Toolstash runs the command line using the stashed
 // copy of the binary instead of the installed one.
 //
-// The -v flag causes toolstash to print information about commands being copied or run.
+// The -n flag causes toolstash to print the commands that would be executed
+// but not execute them. The combination -n -cmp shows the two commands
+// that would be compared and then exits successfully. A real -cmp run might
+// run additional commands for diagnosis of an output mismatch.
+//
+// The -v flag causes toolstash to print the commands being executed.
 //
 // Comparing
 //
@@ -125,13 +130,11 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
 	"runtime"
-	"strconv"
 	"strings"
 )
 
-var usageMessage = `usage: toolstash [-v] [-cmp] command line
+var usageMessage = `usage: toolstash [-n] [-v] [-cmp] command line
 
 Examples:
 	toolstash save
@@ -149,7 +152,8 @@ func usage() {
 }
 
 var (
-	verbose = flag.Bool("v", false, "verbose")
+	norun   = flag.Bool("n", false, "print but do not run commands")
+	verbose = flag.Bool("v", false, "print commands being run")
 	cmp     = flag.Bool("cmp", false, "compare tool object files")
 )
 
@@ -165,7 +169,7 @@ var (
 )
 
 func canCmp(name string) bool {
-	return len(name) == 2 && '0' <= name[0] && name[0] <= '9' && (name[1] == 'a' || name[1] == 'g')
+	return len(name) == 2 && '0' <= name[0] && name[0] <= '9' && (name[1] == 'a' || name[1] == 'g' || name[1] == 'l')
 }
 
 var binTools = []string{"go", "godoc", "gofmt"}
@@ -213,21 +217,27 @@ func main() {
 		tool = tool[i+1:]
 	}
 
-	toolStash = filepath.Join(stashDir, tool)
-	if _, err := os.Stat(toolStash); err != nil {
-		log.Print(err)
-		os.Exit(2)
+	if !strings.HasPrefix(tool, "a.out") {
+		toolStash = filepath.Join(stashDir, tool)
+		if _, err := os.Stat(toolStash); err != nil {
+			log.Print(err)
+			os.Exit(2)
+		}
+
+		if *cmp && canCmp(tool) {
+			compareTool()
+			return
+		}
+		cmd[0] = toolStash
 	}
 
-	if *cmp && canCmp(tool) {
-		compareTool()
+	if *norun {
+		fmt.Printf("%s\n", strings.Join(cmd, " "))
 		return
 	}
-
 	if *verbose {
 		log.Print(strings.Join(cmd, " "))
 	}
-	cmd[0] = filepath.Join(stashDir, tool)
 	xcmd := exec.Command(cmd[0], cmd[1:]...)
 	xcmd.Stdin = os.Stdin
 	xcmd.Stdout = os.Stdout
@@ -250,6 +260,7 @@ func compareTool() {
 		return
 	}
 
+	extra := "-S"
 	switch {
 	default:
 		log.Fatalf("unknown tool %s", tool)
@@ -259,24 +270,28 @@ func compareTool() {
 		_, ok := cmpRun(false, cmdN)
 		if !ok {
 			log.Printf("compiler output differs, even with optimizers disabled (-N)")
-			cmd = append([]string{cmd[0], "-v", "-N"}, cmd[1:]...)
+			cmd = append([]string{cmd[0], "-v", "-N", "-m=2"}, cmd[1:]...)
 			break
 		}
 		cmdR := append([]string{cmd[0], "-R"}, cmd[1:]...)
 		_, ok = cmpRun(false, cmdR)
 		if !ok {
 			log.Printf("compiler output differs, even with peephole optimizer disabled (-R)")
-			cmd = append([]string{cmd[0], "-v", "-R"}, cmd[1:]...)
+			cmd = append([]string{cmd[0], "-v", "-R", "-m=2"}, cmd[1:]...)
 			break
 		}
-		cmd = append([]string{cmd[0], "-v", "-R", "-P"}, cmd[1:]...)
+		cmd = append([]string{cmd[0], "-v", "-R", "-P", "-m=2"}, cmd[1:]...)
 		log.Printf("compiler output differs, only with peephole optimizer enabled")
 
 	case strings.HasSuffix(tool, "a"): // assembler
 		log.Printf("assembler output differs")
+	
+	case strings.HasSuffix(tool, "l"): // linker
+		log.Printf("linker output differs")
+		extra = "-v=2"
 	}
 
-	cmdS := append([]string{cmd[0], "-S"}, cmd[1:]...)
+	cmdS := append([]string{cmd[0], extra}, cmd[1:]...)
 	outfile, ok = cmpRun(true, cmdS)
 
 	fmt.Fprintf(os.Stderr, "\n%s\n", compareLogs(outfile))
@@ -304,14 +319,22 @@ func cmpRun(keepLog bool, cmd []string) (outfile string, match bool) {
 		log.Fatalf("cannot determine output file for command: %s", strings.Join(cmd, " "))
 	}
 
+	if *norun {
+		fmt.Printf("%s\n", strings.Join(cmd, " "))
+		fmt.Printf("%s\n", strings.Join(cmdStash, " "))
+		os.Exit(0)
+	}
+
 	out, err := runCmd(cmd, keepLog, outfile+".log")
 	if err != nil {
+		log.Printf("running: %s", strings.Join(cmd, " "))
 		os.Stderr.Write(out)
 		log.Fatal(err)
 	}
 
 	outStash, err := runCmd(cmdStash, keepLog, outfile+".stash.log")
 	if err != nil {
+		log.Printf("running: %s", strings.Join(cmdStash, " "))
 		log.Printf("installed tool succeeded but stashed tool failed.\n")
 		if len(out) > 0 {
 			log.Printf("installed tool output:")
@@ -478,116 +501,6 @@ func runCmd(cmd []string, keepLog bool, logName string) (output []byte, err erro
 	defer f.Close()
 	return nil, xcmd.Run()
 }
-
-var (
-	hexDumpRE = regexp.MustCompile(`^\t(0x[0-9a-f]{4,})(( ([0-9a-f]{2}|  )){16})  [ -\x7F]{1,16}\n`)
-	listingRE = regexp.MustCompile(`^\t(0x[0-9a-f]{4,}) ([0-9]{4,}) \(.*:[0-9]+\)\t`)
-)
-
-func compareLogs(outfile string) string {
-	f1, err := os.Open(outfile + ".log")
-	if err != nil {
-		log.Fatal(err)
-	}
-	defer f1.Close()
-
-	f2, err := os.Open(outfile + ".stash.log")
-	if err != nil {
-		log.Fatal(err)
-	}
-	defer f2.Close()
-
-	b1 := bufio.NewReader(f1)
-	b2 := bufio.NewReader(f2)
-
-	offset := int64(0)
-	textOffset := offset
-	textLineno := 0
-	lineno := 0
-	var line1, line2 string
-	for {
-		var err1, err2 error
-		line1, err1 = b1.ReadString('\n')
-		line2, err2 = b2.ReadString('\n')
-		if strings.Contains(line1, ")\tTEXT\t") {
-			textOffset = offset
-			textLineno = lineno
-		}
-		offset += int64(len(line1))
-		lineno++
-		if err1 == io.EOF && err2 == io.EOF {
-			return "no differences in debugging output"
-		}
-		// First line of log has command, which differs.
-		if lineno == 1 || line1 == line2 && err1 == nil && err2 == nil {
-			continue
-		}
-		if err1 != nil {
-			line1 = err1.Error()
-		}
-		if err2 != nil {
-			line2 = err2.Error()
-		}
-		break
-	}
-
-	msg := fmt.Sprintf("inconsistent log line:\n%s:%d:\n\t%s\n%s:%d:\n\t%s",
-		f1.Name(), lineno, strings.TrimSuffix(line1, "\n"),
-		f2.Name(), lineno, strings.TrimSuffix(line2, "\n"))
-
-	if m := hexDumpRE.FindStringSubmatch(line1); m != nil {
-		target, err := strconv.ParseUint(m[1], 0, 64)
-		if err != nil {
-			goto Skip
-		}
-
-		m2 := hexDumpRE.FindStringSubmatch(line2)
-		if m2 == nil {
-			goto Skip
-		}
-
-		fields1 := strings.Fields(m[2])
-		fields2 := strings.Fields(m2[2])
-		i := 0
-		for i < len(fields1) && i < len(fields2) && fields1[i] == fields2[i] {
-			i++
-		}
-		target += uint64(i)
-
-		f1.Seek(textOffset, 0)
-		b1 = bufio.NewReader(f1)
-		last := ""
-		lineno := textLineno
-		limitAddr := uint64(0)
-		lastAddr := uint64(0)
-		for {
-			line1, err1 := b1.ReadString('\n')
-			if err1 != nil {
-				break
-			}
-			lineno++
-			if m := listingRE.FindStringSubmatch(line1); m != nil {
-				addr, _ := strconv.ParseUint(m[1], 0, 64)
-				if addr > target {
-					limitAddr = addr
-					break
-				}
-				last = line1
-				lastAddr = addr
-			} else if hexDumpRE.FindStringSubmatch(line1) != nil {
-				break
-			}
-		}
-		if last != "" {
-			msg = fmt.Sprintf("assembly instruction at %#04x-%#04x:\n%s:%d\n\t%s\n\n%s",
-				lastAddr, limitAddr, f1.Name(), lineno-1, strings.TrimSuffix(last, "\n"), msg)
-		}
-	}
-Skip:
-
-	return msg
-}
-
 func save() {
 	if err := os.MkdirAll(stashDir, 0777); err != nil {
 		log.Fatal(err)
