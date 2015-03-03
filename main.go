@@ -9,8 +9,8 @@
 //
 //	toolstash [-n] [-v] save [tool...]
 //	toolstash [-n] [-v] restore [tool...]
-//	toolstash [-n] [-v] go run x.go
-//	toolstash [-n] [-v] [-cmp] 6g x.go
+//	toolstash [-n] [-v] [-t] go run x.go
+//	toolstash [-n] [-v] [-t] [-cmp] 6g x.go
 //
 // The toolstash command manages a ``stashed'' copy of the Go toolchain
 // kept in $GOROOT/pkg/toolstash. In this case, the toolchain means the
@@ -35,6 +35,9 @@
 // run additional commands for diagnosis of an output mismatch.
 //
 // The -v flag causes toolstash to print the commands being executed.
+//
+// The -t flag causes toolstash to print the time elapsed during while the
+// command ran.
 //
 // Comparing
 //
@@ -132,6 +135,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"time"
 )
 
 var usageMessage = `usage: toolstash [-n] [-v] [-cmp] command line
@@ -155,6 +159,7 @@ var (
 	norun   = flag.Bool("n", false, "print but do not run commands")
 	verbose = flag.Bool("v", false, "print commands being run")
 	cmp     = flag.Bool("cmp", false, "compare tool object files")
+	timing  = flag.Bool("t", false, "print time commands take")
 )
 
 var (
@@ -285,7 +290,7 @@ func compareTool() {
 
 	case strings.HasSuffix(tool, "a"): // assembler
 		log.Printf("assembler output differs")
-	
+
 	case strings.HasSuffix(tool, "l"): // linker
 		log.Printf("linker output differs")
 		extra = "-v=2"
@@ -486,6 +491,13 @@ func runCmd(cmd []string, keepLog bool, logName string) (output []byte, err erro
 		log.Print(strings.Join(cmd, " "))
 	}
 
+	if *timing {
+		t0 := time.Now()
+		defer func() {
+			log.Printf("%.3fs elapsed # %s\n", time.Since(t0).Seconds(), strings.Join(cmd, " "))
+		}()
+	}
+
 	xcmd := exec.Command(cmd[0], cmd[1:]...)
 	if !keepLog {
 		return xcmd.CombinedOutput()
@@ -501,6 +513,7 @@ func runCmd(cmd []string, keepLog bool, logName string) (output []byte, err erro
 	defer f.Close()
 	return nil, xcmd.Run()
 }
+
 func save() {
 	if err := os.MkdirAll(stashDir, 0777); err != nil {
 		log.Fatal(err)
