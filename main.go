@@ -10,7 +10,7 @@
 //	toolstash [-n] [-v] save [tool...]
 //	toolstash [-n] [-v] restore [tool...]
 //	toolstash [-n] [-v] [-t] go run x.go
-//	toolstash [-n] [-v] [-t] [-cmp] 6g x.go
+//	toolstash [-n] [-v] [-t] [-cmp] compile x.go
 //
 // The toolstash command manages a ``stashed'' copy of the Go toolchain
 // kept in $GOROOT/pkg/toolstash. In this case, the toolchain means the
@@ -25,7 +25,7 @@
 // Otherwise, it applies to all tools.
 //
 // Otherwise, toolstash's arguments should be a command line beginning with the
-// name of a toolchain binary, which may be a short name like 6g or a complete path
+// name of a toolchain binary, which may be a short name like compile or a complete path
 // to an installed binary. Toolstash runs the command line using the stashed
 // copy of the binary instead of the installed one.
 //
@@ -62,13 +62,13 @@
 //
 //	toolstash save
 //	<edit compiler sources>
-//	go tool dist install liblink cmd/gc cmd/6g # install compiler only
-//	toolstash -cmp 6g x.go
+//	go tool dist install cmd/compile # install compiler only
+//	toolstash -cmp compile x.go
 //
 // Go Command Integration
 //
-// There is a pending change to the go command to add a -toolexec flag that
-// specifies a program to use to run the build tools.
+// The go command accepts a -toolexec flag that specifies a program
+// to use to run the build tools.
 //
 // To build with the stashed tools:
 //
@@ -89,7 +89,7 @@
 //
 //	# Install new tools, but do not rebuild the rest of tree,
 //	# since the compilers might generate buggy code.
-//	go tool dist install liblink cmd/gc cmd/6a cmd/6g
+//	go tool dist install cmd/compile
 //
 //	# Check that new tools behave identically to saved tools.
 //	go build -toolexec 'toolstash -cmp' -a std
@@ -144,8 +144,8 @@ Examples:
 	toolstash save
 	toolstash restore
 	toolstash go run x.go
-	toolstash 6g x.go
-	toolstash -cmp 6g x.go
+	toolstash compile x.go
+	toolstash -cmp compile x.go
 
 For details, godoc rsc.io/toolstash
 `
@@ -164,7 +164,7 @@ var (
 
 var (
 	cmd       []string
-	tool      string // name of tool: "go", "6g", etc
+	tool      string // name of tool: "go", "compile", etc
 	toolStash string // path to stashed tool
 
 	goroot   string
@@ -174,6 +174,10 @@ var (
 )
 
 func canCmp(name string) bool {
+	switch name {
+	case "compile", "link", "asm":
+		return true
+	}
 	return len(name) == 2 && '0' <= name[0] && name[0] <= '9' && (name[1] == 'a' || name[1] == 'g' || name[1] == 'l')
 }
 
@@ -270,7 +274,7 @@ func compareTool() {
 	default:
 		log.Fatalf("unknown tool %s", tool)
 
-	case strings.HasSuffix(tool, "g"): // compiler
+	case tool == "compile" || strings.HasSuffix(tool, "g"): // compiler
 		cmdN := append([]string{cmd[0], "-N"}, cmd[1:]...)
 		_, ok := cmpRun(false, cmdN)
 		if !ok {
@@ -288,10 +292,10 @@ func compareTool() {
 		cmd = append([]string{cmd[0], "-v", "-R", "-P", "-m=2"}, cmd[1:]...)
 		log.Printf("compiler output differs, only with peephole optimizer enabled")
 
-	case strings.HasSuffix(tool, "a"): // assembler
+	case tool == "asm" || strings.HasSuffix(tool, "a"): // assembler
 		log.Printf("assembler output differs")
 
-	case strings.HasSuffix(tool, "l"): // linker
+	case tool == "link" || strings.HasSuffix(tool, "l"): // linker
 		log.Printf("linker output differs")
 		extra = "-v=2"
 	}
