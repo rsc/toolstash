@@ -282,15 +282,6 @@ func compareTool() {
 			cmd = append([]string{cmd[0], "-v", "-N", "-m=2"}, cmd[1:]...)
 			break
 		}
-		cmdR := append([]string{cmd[0], "-R"}, cmd[1:]...)
-		_, ok = cmpRun(false, cmdR)
-		if !ok {
-			log.Printf("compiler output differs, even with peephole optimizer disabled (-R)")
-			cmd = append([]string{cmd[0], "-v", "-R", "-m=2"}, cmd[1:]...)
-			break
-		}
-		cmd = append([]string{cmd[0], "-v", "-R", "-P", "-m=2"}, cmd[1:]...)
-		log.Printf("compiler output differs, only with peephole optimizer enabled")
 
 	case tool == "asm" || strings.HasSuffix(tool, "a"): // assembler
 		log.Printf("assembler output differs")
