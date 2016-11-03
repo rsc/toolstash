@@ -282,6 +282,8 @@ func compareTool() {
 			cmd = append([]string{cmd[0], "-v", "-N", "-m=2"}, cmd[1:]...)
 			break
 		}
+		cmd = append([]string{cmd[0], "-v", "-m=2"}, cmd[1:]...)
+		log.Printf("compiler output differs, only with optimizers enabled")
 
 	case tool == "asm" || strings.HasSuffix(tool, "a"): // assembler
 		log.Printf("assembler output differs")
