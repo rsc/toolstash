@@ -31,7 +31,7 @@ if [ "$1" = "-work" ]; then
 fi
 
 cd $(go env GOROOT)/src
-go install cmd/compile cmd/link cmd/old{5,6,8,9}a cmd/asm || exit 1
+go install cmd/compile cmd/link cmd/asm || exit 1
 pattern="$1"
 if [ "$pattern" = "" ]; then
 	pattern=.
