@@ -1,3 +1,1 @@
-go get rsc.io/toolstash
-
-http://godoc.org/rsc.io/toolstash
+toolstash has moved to [golang.org/x/tools/cmd/toolstash](https://godoc.org/golang.org/x/tools/cmd/toolstash).
